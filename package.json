@@ -1,0 +1,43 @@
+{
+  "name": "message-translator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Recebe webhooks, persiste a mensagem raw, transforma o formato e enfileira o resultado.",
+  "bin": {
+    "message-translator": "bin/app.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "local:up": "docker compose -f localstack/docker-compose.yml up -d",
+    "local:down": "docker compose -f localstack/docker-compose.yml down",
+    "local:bootstrap": "cdklocal bootstrap",
+    "local:deploy": "DISABLE_AUTHORIZER=true cdklocal deploy --require-approval never",
+    "smoke:local": "bash scripts/smoke-local.sh",
+    "local:destroy": "cdklocal destroy --force"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "3.1068.0",
+    "@aws-sdk/client-dynamodb": "3.1068.0",
+    "@aws-sdk/lib-dynamodb": "3.1068.0",
+    "jose": "6.2.3"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.162",
+    "@types/node": "22.19.21",
+    "aws-cdk": "2.1127.0",
+    "aws-cdk-lib": "2.259.0",
+    "aws-cdk-local": "3.0.4",
+    "constructs": "10.6.0",
+    "esbuild": "0.28.1",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
+  }
+}

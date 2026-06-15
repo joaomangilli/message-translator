@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build, test & synth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: CDK synth
+        run: npx cdk synth
+
+  e2e-localstack:
+    name: E2E contra LocalStack
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Instalar awslocal
+        run: pip install awscli-local awscli
+
+      - name: Subir LocalStack
+        run: npm run local:up
+
+      - name: Smoke test e2e
+        run: bash scripts/smoke-local.sh
+
+      - name: Logs do LocalStack (em caso de falha)
+        if: failure()
+        run: docker logs message-translator-localstack 2>&1 | tail -100
+
+      - name: Derrubar LocalStack
+        if: always()
+        run: npm run local:down

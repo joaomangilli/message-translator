@@ -1,0 +1,12 @@
+node_modules/
+cdk.out/
+dist/
+*.js
+*.d.ts
+!localstack/**/*.js
+.DS_Store
+*.log
+.env
+.env.local
+cdk-outputs.json
+localstack/volume/

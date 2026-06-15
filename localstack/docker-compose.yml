@@ -1,0 +1,15 @@
+services:
+  localstack:
+    container_name: message-translator-localstack
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566" # edge / endpoint único
+    environment:
+      - SERVICES=apigateway,lambda,sqs,dynamodb,iam,sts,cloudformation,ssm,logs
+      - DEBUG=0
+      - LAMBDA_RUNTIME_ENVIRONMENT_TIMEOUT=60
+      # O LocalStack injeta AWS_ENDPOINT_URL nos Lambdas para que o SDK aponte
+      # de volta para ele. Os helpers em src/lib honram essa variável.
+    volumes:
+      - "./volume:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
