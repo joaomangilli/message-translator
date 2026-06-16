@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+# Roda as JS actions (checkout, setup-node) em Node.js 24 — Node.js 20 está deprecado.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-test:
     name: Build, test & synth

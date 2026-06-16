@@ -21,7 +21,8 @@ Webhook ──▶ API Gateway (REST) ──▶ [Lambda Authorizer valida token d
 Stack: **TypeScript 5.x + AWS CDK v2**, runtime **Node.js 22**, região padrão `us-east-1`.
 Arquitetura das Lambdas configurável: **`arm64`** (Graviton) por padrão em qa/prod, **`x86_64`** no
 deploy local/CI (LocalStack roda em amd64). Os recursos são **namespaceados por ambiente** (sufixo
-`-qa` / `-prod` / `-local`) para coexistirem na mesma conta sem colidir.
+`-qa` / `-prod` / `-local`) para coexistirem na mesma conta sem colidir. Em **`prod`** a tabela
+`RawMessages` usa `removalPolicy: RETAIN` (preserva os dados ao destruir a stack); em qa/local é `DESTROY`.
 
 ## Estrutura
 
@@ -150,5 +151,3 @@ aprovação manual via *required reviewers* do Environment.
 
 - Dedupe garantido *antes* da entrega (claim `pending` → envia → `delivered`) se quiser evitar o
   at-least-once na `output-queue`.
-- `removalPolicy: RETAIN` para a tabela em `prod` (hoje é `DESTROY`, pensado para dev).
-- Atualizar as actions para Node.js 24 (o runner avisa que Node.js 20 será removido).

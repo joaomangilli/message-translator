@@ -51,7 +51,9 @@ export class TranslatorStack extends cdk.Stack {
       tableName: `RawMessages-${env}`,
       partitionKey: { name: 'eventUuid', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      removalPolicy: cdk.RemovalPolicy.DESTROY, // ambiente de dev; revise em prod
+      // Em prod preserva os dados ao destruir a stack; qa/local descartam.
+      removalPolicy:
+        env === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       timeToLiveAttribute: 'ttl',
     });
 
