@@ -2,7 +2,7 @@ import type { SQSEvent, SQSBatchResponse, SQSBatchItemFailure } from 'aws-lambda
 import { saveRawMessageIfNew } from '../lib/ddb';
 import { sendMessage } from '../lib/sqs';
 import { translate } from '../transform';
-import type { InputMessage } from '../transform/types';
+import { InputMessageSchema } from '../transform/types';
 
 const TABLE_NAME = process.env.TABLE_NAME ?? '';
 const OUTPUT_QUEUE_URL = process.env.OUTPUT_QUEUE_URL ?? '';
@@ -24,13 +24,17 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
 
   for (const record of event.Records) {
     try {
-      const raw = JSON.parse(record.body) as InputMessage;
-
-      const eventUuid = raw.EventUuid;
-      if (!eventUuid) {
-        // Sem chave de idempotência não dá para auditar/deduplicar; manda para a DLQ.
-        throw new Error('mensagem sem EventUuid');
+      // Valida o payload ANTES de transformar: schema malformado (campo obrigatório
+      // faltando, tipo errado, string vazia) é rejeitado e cai na DLQ via o catch.
+      const parsed: unknown = JSON.parse(record.body);
+      const result = InputMessageSchema.safeParse(parsed);
+      if (!result.success) {
+        throw new Error(`payload inválido: ${result.error.message}`);
       }
+      const raw = result.data;
+
+      // `EventUuid` é garantido não-vazio pelo schema (chave de idempotência).
+      const eventUuid = raw.EventUuid;
 
       // 1. Entrega primeiro. Se falhar, nada foi gravado: a retentativa reenvia.
       const translated = translate(raw);
