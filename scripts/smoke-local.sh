@@ -31,8 +31,10 @@ if [ "$ready" != 1 ]; then
 fi
 
 echo "==> Bootstrap + deploy (sem authorizer; LocalStack community não suporta)"
+# x86_64: o runner do CI é amd64; emular Lambda arm64 estoura o startup no LocalStack.
 npx cdklocal bootstrap
-DISABLE_AUTHORIZER=true npx cdklocal deploy --require-approval never --outputs-file cdk-outputs.json
+DISABLE_AUTHORIZER=true LAMBDA_ARCHITECTURE=x86_64 \
+  npx cdklocal deploy --require-approval never --outputs-file cdk-outputs.json
 
 # Sem ENVIRONMENT, o app usa o ambiente 'local' (stack MessageTranslator-local).
 STACK=MessageTranslator-local
