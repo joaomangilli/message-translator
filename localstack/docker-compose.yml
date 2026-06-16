@@ -1,7 +1,10 @@
 services:
   localstack:
     container_name: message-translator-localstack
-    image: localstack/localstack:latest
+    # Pinado numa versão COMMUNITY: a tag `latest` passou a resolver builds que
+    # exigem LOCALSTACK_AUTH_TOKEN (Pro) e encerram sem licença. Este projeto usa
+    # só serviços community (por isso o authorizer é pulado no deploy local).
+    image: localstack/localstack:4.3
     ports:
       - "4566:4566" # edge / endpoint único
     environment:
