@@ -40,18 +40,6 @@ jobs:
 
       - run: npm ci
 
-      # ⚠️ TEMPORÁRIO — apenas para depurar o ARN inválido. REVELA o secret no log
-      # (quebra o mascaramento do GitHub de propósito). REMOVER após o diagnóstico.
-      - name: DEBUG TEMP — inspecionar AWS_DEPLOY_ROLE_ARN
-        env:
-          ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-        run: |
-          echo "comprimento (bytes): ${#ARN}"
-          echo "casa o formato esperado? (arn:aws:iam::<12 dígitos>:role/...)"
-          printf '%s' "$ARN" | grep -qE '^arn:aws:iam::[0-9]{12}:role/.+$' && echo "  -> OK" || echo "  -> NÃO"
-          echo "bytes (od -c, revela espaços/quebras de linha):"
-          printf '%s' "$ARN" | od -An -c
-
       - name: Configurar credenciais AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
