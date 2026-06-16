@@ -11,13 +11,24 @@ unset AWS_PROFILE || true
 ENDPOINT=http://localhost:4566
 
 echo "==> Aguardando LocalStack ficar healthy..."
-for i in $(seq 1 60); do
-  if curl -s "$ENDPOINT/_localstack/health" 2>/dev/null | grep -q '"sqs": "available"'; then
+# O health reporta o serviço como "available" (pronto) ou "running" (já usado);
+# aceitamos ambos e toleramos espaçamento do JSON. Falha alto se não ficar pronto,
+# em vez de seguir e quebrar mais adiante no bootstrap (sem STS = sem conta).
+ready=0
+for i in $(seq 1 90); do
+  if curl -s "$ENDPOINT/_localstack/health" 2>/dev/null \
+      | grep -qE '"sqs":[[:space:]]*"(available|running)"'; then
     echo "    pronto (tentativa $i)"
+    ready=1
     break
   fi
   sleep 2
 done
+if [ "$ready" != 1 ]; then
+  echo "FALHA: LocalStack não ficou pronto (sqs available/running)"
+  curl -s "$ENDPOINT/_localstack/health" || true
+  exit 1
+fi
 
 echo "==> Bootstrap + deploy (sem authorizer; LocalStack community não suporta)"
 npx cdklocal bootstrap
