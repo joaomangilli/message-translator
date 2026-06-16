@@ -13,6 +13,8 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 export interface TranslatorStackProps extends cdk.StackProps {
   /** Ambiente de deploy (ex. `qa`, `prod`, `local`); sufixa os nomes físicos. */
   readonly environment: string;
+  /** Arquitetura das Lambdas. Default `arm64` (Graviton); `x86_64` p/ LocalStack/CI. */
+  readonly lambdaArchitecture?: 'arm64' | 'x86_64';
   /**
    * Nome do secret (no AWS Secrets Manager) cujo `SecretString` é o secret HS256
    * usado pelo Lambda Authorizer para verificar o Bearer JWT. O secret deve já
@@ -34,6 +36,11 @@ export class TranslatorStack extends cdk.Stack {
     // Sufixo de ambiente aplicado a todos os nomes físicos, para que qa/prod (e
     // local) coexistam na mesma conta/região sem colidir.
     const env = props.environment;
+
+    const architecture =
+      props.lambdaArchitecture === 'x86_64'
+        ? lambda.Architecture.X86_64
+        : lambda.Architecture.ARM_64;
 
     // ---------------------------------------------------------------------
     // DynamoDB: guarda a mensagem RAW (como chegou) para auditoria/reprocesso.
@@ -91,7 +98,7 @@ export class TranslatorStack extends cdk.Stack {
         entry: path.join(__dirname, '../src/handlers/authorizer.ts'),
         handler: 'handler',
         runtime: lambda.Runtime.NODEJS_22_X,
-        architecture: lambda.Architecture.ARM_64,
+        architecture,
         timeout: cdk.Duration.seconds(10),
         environment: {
           JWT_SECRET_NAME: props.jwtSecretName,
@@ -115,7 +122,7 @@ export class TranslatorStack extends cdk.Stack {
       entry: path.join(__dirname, '../src/handlers/translator.ts'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_22_X,
-      architecture: lambda.Architecture.ARM_64,
+      architecture,
       timeout: cdk.Duration.seconds(30),
       environment: {
         TABLE_NAME: rawTable.tableName,

@@ -15,7 +15,7 @@
     "local:up": "docker compose -f localstack/docker-compose.yml up -d",
     "local:down": "docker compose -f localstack/docker-compose.yml down",
     "local:bootstrap": "cdklocal bootstrap",
-    "local:deploy": "DISABLE_AUTHORIZER=true cdklocal deploy --require-approval never",
+    "local:deploy": "DISABLE_AUTHORIZER=true LAMBDA_ARCHITECTURE=x86_64 cdklocal deploy --require-approval never",
     "smoke:local": "bash scripts/smoke-local.sh",
     "local:destroy": "cdklocal destroy --force"
   },

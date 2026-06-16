@@ -18,6 +18,9 @@ new TranslatorStack(app, `MessageTranslator-${environment}`, {
     region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
   },
   environment,
+  // Arquitetura das Lambdas. Default arm64 (Graviton, prod). LocalStack/CI roda em
+  // x86_64; emular arm64 estoura o startup, então o deploy local define x86_64.
+  lambdaArchitecture: process.env.LAMBDA_ARCHITECTURE === 'x86_64' ? 'x86_64' : 'arm64',
   // Nome do secret (Secrets Manager) cujo valor é o secret HS256 do Bearer JWT.
   // O secret deve existir na conta/região; só é referenciado aqui, não criado.
   // `||` (não `??`) para que JWT_SECRET_NAME vazio do GitHub caia no default.
