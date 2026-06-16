@@ -101,6 +101,24 @@ describe('translator handler', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it('rejeita payload com campo obrigatório faltando (sem enviar)', async () => {
+    const res = await handler(event([{ messageId: 'no-email', body: inputBody({ Email: undefined }) }]));
+    expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'no-email' }]);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejeita payload com campo de tipo errado (sem enviar)', async () => {
+    const res = await handler(event([{ messageId: 'bad-type', body: inputBody({ Email: 123 }) }]));
+    expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'bad-type' }]);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejeita payload com string obrigatória vazia (sem enviar)', async () => {
+    const res = await handler(event([{ messageId: 'empty', body: inputBody({ FirstName: '' }) }]));
+    expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'empty' }]);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it('reporta como falha apenas a mensagem com body inválido', async () => {
     const res = await handler(
       event([

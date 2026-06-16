@@ -1,9 +1,16 @@
 name: Deploy
 
+# Deploy SOMENTE manual: escolha o ambiente no "Run workflow". Não roda em push.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente de deploy
+        type: choice
+        required: true
+        options:
+          - qa
+          - prod
 
 # OIDC: assume uma role na AWS sem chaves de longa duração.
 permissions:
@@ -11,14 +18,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: cdk deploy (AWS)
+    name: cdk deploy (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +44,9 @@ jobs:
 
       - name: CDK deploy
         env:
-          # Authorizer atachado normalmente em AWS real (default attachAuthorizer=true).
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        run: npx cdk deploy --require-approval never
+          # Ambiente escolhido no dispatch; namespaceia os recursos no CDK.
+          ENVIRONMENT: ${{ inputs.environment }}
+          # Nome do secret (Secrets Manager) por GitHub Environment; se vazio, o
+          # bin/app.ts cai no default por ambiente (message-translator/<env>/jwt-secret).
+          JWT_SECRET_NAME: ${{ vars.JWT_SECRET_NAME }}
+        run: npx cdk deploy "MessageTranslator-$ENVIRONMENT" --require-approval never

@@ -4,14 +4,25 @@ import { TranslatorStack } from '../lib/translator-stack';
 
 const app = new cdk.App();
 
-new TranslatorStack(app, 'MessageTranslatorStack', {
+// Ambiente de deploy. `local` é o default para dev/LocalStack/`cdk synth` (rodam
+// sem ENVIRONMENT). O CD só passa `qa` ou `prod` (restrito pelo dropdown do workflow).
+const environment = process.env.ENVIRONMENT ?? 'local';
+const VALID_ENVIRONMENTS = ['qa', 'prod', 'local'];
+if (!VALID_ENVIRONMENTS.includes(environment)) {
+  throw new Error(`ENVIRONMENT inválido: "${environment}". Use: qa, prod.`);
+}
+
+new TranslatorStack(app, `MessageTranslator-${environment}`, {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
   },
-  // Secret (HS256) usado para verificar o Bearer JWT. Vem da env var JWT_SECRET.
-  // Default só para dev/LocalStack; em produção defina JWT_SECRET no ambiente.
-  jwtSecret: process.env.JWT_SECRET ?? 'local-dev-secret',
+  environment,
+  // Nome do secret (Secrets Manager) cujo valor é o secret HS256 do Bearer JWT.
+  // O secret deve existir na conta/região; só é referenciado aqui, não criado.
+  // `||` (não `??`) para que JWT_SECRET_NAME vazio do GitHub caia no default.
+  jwtSecretName:
+    process.env.JWT_SECRET_NAME || `message-translator/${environment}/jwt-secret`,
   // LocalStack community não suporta AWS::ApiGateway::Authorizer; o script
   // local:deploy define DISABLE_AUTHORIZER=true para pular a vinculação.
   attachAuthorizer: process.env.DISABLE_AUTHORIZER !== 'true',

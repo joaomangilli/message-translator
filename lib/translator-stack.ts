@@ -8,10 +8,17 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 export interface TranslatorStackProps extends cdk.StackProps {
-  /** Secret (HS256) usado pelo Lambda Authorizer para verificar o Bearer JWT. */
-  readonly jwtSecret: string;
+  /** Ambiente de deploy (ex. `qa`, `prod`, `local`); sufixa os nomes físicos. */
+  readonly environment: string;
+  /**
+   * Nome do secret (no AWS Secrets Manager) cujo `SecretString` é o secret HS256
+   * usado pelo Lambda Authorizer para verificar o Bearer JWT. O secret deve já
+   * existir; este stack apenas o referencia e concede leitura ao authorizer.
+   */
+  readonly jwtSecretName: string;
   /**
    * Atacha o Lambda Authorizer ao método. Default `true`. Defina `false` no
    * LocalStack community, que NÃO suporta `AWS::ApiGateway::Authorizer`
@@ -24,13 +31,17 @@ export class TranslatorStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: TranslatorStackProps) {
     super(scope, id, props);
 
+    // Sufixo de ambiente aplicado a todos os nomes físicos, para que qa/prod (e
+    // local) coexistam na mesma conta/região sem colidir.
+    const env = props.environment;
+
     // ---------------------------------------------------------------------
     // DynamoDB: guarda a mensagem RAW (como chegou) para auditoria/reprocesso.
     // ---------------------------------------------------------------------
     // PK = eventUuid (campo `EventUuid` da mensagem) garante idempotência:
     // o handler faz PutItem condicional e ignora duplicadas.
     const rawTable = new dynamodb.Table(this, 'RawMessages', {
-      tableName: 'RawMessages',
+      tableName: `RawMessages-${env}`,
       partitionKey: { name: 'eventUuid', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // ambiente de dev; revise em prod
@@ -41,21 +52,21 @@ export class TranslatorStack extends cdk.Stack {
     // SQS: fila de entrada (ingest) + fila de saída (output), cada uma com DLQ.
     // ---------------------------------------------------------------------
     const ingestDlq = new sqs.Queue(this, 'IngestDlq', {
-      queueName: 'ingest-dlq',
+      queueName: `ingest-dlq-${env}`,
       retentionPeriod: cdk.Duration.days(14),
     });
     const ingestQueue = new sqs.Queue(this, 'IngestQueue', {
-      queueName: 'ingest-queue',
+      queueName: `ingest-queue-${env}`,
       visibilityTimeout: cdk.Duration.seconds(60),
       deadLetterQueue: { queue: ingestDlq, maxReceiveCount: 5 },
     });
 
     const outputDlq = new sqs.Queue(this, 'OutputDlq', {
-      queueName: 'output-dlq',
+      queueName: `output-dlq-${env}`,
       retentionPeriod: cdk.Duration.days(14),
     });
     const outputQueue = new sqs.Queue(this, 'OutputQueue', {
-      queueName: 'output-queue',
+      queueName: `output-queue-${env}`,
       visibilityTimeout: cdk.Duration.seconds(60),
       deadLetterQueue: { queue: outputDlq, maxReceiveCount: 5 },
     });
@@ -68,17 +79,26 @@ export class TranslatorStack extends cdk.Stack {
     let authorizer: apigateway.RequestAuthorizer | undefined;
 
     if (attachAuthorizer) {
+      // Secret existente: apenas referenciado (não criado) e lido em runtime.
+      const jwtSecret = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        'JwtSecret',
+        props.jwtSecretName,
+      );
+
       const authorizerFn = new nodejs.NodejsFunction(this, 'AuthorizerFn', {
-        functionName: 'webhook-authorizer',
+        functionName: `webhook-authorizer-${env}`,
         entry: path.join(__dirname, '../src/handlers/authorizer.ts'),
         handler: 'handler',
         runtime: lambda.Runtime.NODEJS_22_X,
         architecture: lambda.Architecture.ARM_64,
         timeout: cdk.Duration.seconds(10),
         environment: {
-          JWT_SECRET: props.jwtSecret,
+          JWT_SECRET_NAME: props.jwtSecretName,
         },
       });
+
+      jwtSecret.grantRead(authorizerFn);
 
       authorizer = new apigateway.RequestAuthorizer(this, 'WebhookAuthorizer', {
         handler: authorizerFn,
@@ -91,7 +111,7 @@ export class TranslatorStack extends cdk.Stack {
     // Lambda translator: consome ingest-queue, salva raw, transforma, envia.
     // ---------------------------------------------------------------------
     const translatorFn = new nodejs.NodejsFunction(this, 'TranslatorFn', {
-      functionName: 'message-translator',
+      functionName: `message-translator-${env}`,
       entry: path.join(__dirname, '../src/handlers/translator.ts'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -122,8 +142,8 @@ export class TranslatorStack extends cdk.Stack {
     ingestQueue.grantSendMessages(apiToSqsRole);
 
     const api = new apigateway.RestApi(this, 'WebhookApi', {
-      restApiName: 'message-translator-webhook',
-      deployOptions: { stageName: 'prod' },
+      restApiName: `message-translator-webhook-${env}`,
+      deployOptions: { stageName: env },
     });
 
     const sqsIntegration = new apigateway.AwsIntegration({

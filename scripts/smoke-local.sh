@@ -23,8 +23,11 @@ echo "==> Bootstrap + deploy (sem authorizer; LocalStack community não suporta)
 npx cdklocal bootstrap
 DISABLE_AUTHORIZER=true npx cdklocal deploy --require-approval never --outputs-file cdk-outputs.json
 
-WEBHOOK_URL=$(node -e "console.log(require('./cdk-outputs.json').MessageTranslatorStack.WebhookUrl)")
-OUTPUT_QUEUE_URL=$(node -e "console.log(require('./cdk-outputs.json').MessageTranslatorStack.OutputQueueUrl)")
+# Sem ENVIRONMENT, o app usa o ambiente 'local' (stack MessageTranslator-local).
+STACK=MessageTranslator-local
+WEBHOOK_URL=$(node -e "console.log(require('./cdk-outputs.json')['$STACK'].WebhookUrl)")
+OUTPUT_QUEUE_URL=$(node -e "console.log(require('./cdk-outputs.json')['$STACK'].OutputQueueUrl)")
+TABLE_NAME=$(node -e "console.log(require('./cdk-outputs.json')['$STACK'].RawTableName)")
 echo "    WebhookUrl=$WEBHOOK_URL"
 
 PAYLOAD='{"EventUuid":"smoke-001","Id":"cd4355a5-5c85-11ec-b98f-02adc9d8d6b4","CreatedAt":"2021-04-28T15:00:00Z","Email":"lavinia@example.org","FirstName":"Sebastian","LastName":"Wolf","LastUpdatedAt":"2021-12-14T04:38:16Z","PhoneNumber":"(555) 555-5555","Status":"applied","HasDogs":true}'
@@ -38,7 +41,7 @@ echo "==> Aguardando o Lambda processar..."
 sleep 8
 
 echo "==> Verificando DynamoDB (raw persistido)"
-count=$(awslocal dynamodb scan --table-name RawMessages --select COUNT --query Count --output text)
+count=$(awslocal dynamodb scan --table-name "$TABLE_NAME" --select COUNT --query Count --output text)
 echo "    itens em RawMessages: $count"
 [ "$count" -ge 1 ] || { echo "FALHA: RawMessages vazio"; exit 1; }
 
@@ -47,5 +50,22 @@ body=$(awslocal sqs receive-message --queue-url "$OUTPUT_QUEUE_URL" --query 'Mes
 echo "    body: $body"
 echo "$body" | grep -q '"first_name":"Sebastian"' || { echo "FALHA: snake_case ausente"; exit 1; }
 echo "$body" | grep -q '"Status"' && { echo "FALHA: campo descartado vazou"; exit 1; } || true
+
+echo "==> Edge case: payload malformado (sem Email) deve ser rejeitado"
+# Validação roda no Lambda, então o webhook ainda enfileira e responde 200; a
+# mensagem é reprovada no safeParse e NUNCA é traduzida nem auditada no Dynamo.
+BAD_PAYLOAD='{"EventUuid":"smoke-bad-001","Id":"bad-id-001","CreatedAt":"2021-04-28T15:00:00Z","FirstName":"Sebastian","LastName":"Wolf","LastUpdatedAt":"2021-12-14T04:38:16Z","PhoneNumber":"(555) 555-5555"}'
+code=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$BAD_PAYLOAD")
+echo "    HTTP $code (webhook enfileira normalmente)"
+[ "$code" = "200" ] || { echo "FALHA: esperava 200 do webhook, veio $code"; exit 1; }
+
+echo "==> Aguardando o Lambda processar (e rejeitar)..."
+sleep 8
+
+echo "==> Verificando que o malformado NÃO foi persistido no DynamoDB"
+item=$(awslocal dynamodb get-item --table-name "$TABLE_NAME" \
+  --key '{"eventUuid":{"S":"smoke-bad-001"}}' --query 'Item' --output text)
+[ "$item" = "None" ] || { echo "FALHA: payload malformado foi auditado: $item"; exit 1; }
+echo "    OK: ausente em RawMessages (rejeitado antes de transformar)"
 
 echo "✅ Smoke e2e OK"

@@ -3,8 +3,7 @@ import type {
   APIGatewayRequestAuthorizerEvent,
   APIGatewayAuthorizerResult,
 } from 'aws-lambda';
-
-const JWT_SECRET = process.env.JWT_SECRET ?? '';
+import { getJwtSecret } from '../lib/secrets';
 
 /**
  * Extrai o token de um header `Authorization: Bearer <token>`.
@@ -55,7 +54,7 @@ function policy(
 
 /**
  * Lambda Authorizer (REQUEST). Valida um Bearer JWT no header `Authorization`.
- * O secret (HS256) vem da env var `JWT_SECRET`.
+ * O secret (HS256) vem do AWS Secrets Manager (nome em `JWT_SECRET_NAME`).
  */
 export const handler = async (
   event: APIGatewayRequestAuthorizerEvent,
@@ -64,7 +63,16 @@ export const handler = async (
   const authHeader = headers['Authorization'] ?? headers['authorization'];
 
   const token = extractBearer(authHeader);
-  const payload = token ? await verifyToken(token, JWT_SECRET) : null;
+
+  // Fail-closed: se o secret não puder ser resolvido, nega em vez de estourar.
+  let secret: string;
+  try {
+    secret = await getJwtSecret();
+  } catch {
+    return policy('Deny', 'unauthorized', event.methodArn);
+  }
+
+  const payload = token ? await verifyToken(token, secret) : null;
 
   if (!payload) {
     return policy('Deny', 'unauthorized', event.methodArn);
