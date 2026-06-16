@@ -48,16 +48,24 @@ code=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK_URL" -H "Conten
 echo "    HTTP $code"
 [ "$code" = "200" ] || { echo "FALHA: esperava 200, veio $code"; exit 1; }
 
-echo "==> Aguardando o Lambda processar..."
-sleep 8
-
-echo "==> Verificando DynamoDB (raw persistido)"
-count=$(awslocal dynamodb scan --table-name "$TABLE_NAME" --select COUNT --query Count --output text)
-echo "    itens em RawMessages: $count"
-[ "$count" -ge 1 ] || { echo "FALHA: RawMessages vazio"; exit 1; }
+echo "==> Verificando DynamoDB (raw persistido) — poll p/ tolerar cold start do Lambda"
+# O primeiro invoke do Lambda no LocalStack (sobretudo no CI) pode levar dezenas de
+# segundos (pull da imagem de runtime). Faz polling em vez de sleep fixo.
+count=0
+for i in $(seq 1 30); do
+  count=$(awslocal dynamodb scan --table-name "$TABLE_NAME" --select COUNT --query Count --output text 2>/dev/null || echo 0)
+  [ "$count" -ge 1 ] && { echo "    itens em RawMessages: $count (tentativa $i)"; break; }
+  sleep 2
+done
+[ "$count" -ge 1 ] || { echo "FALHA: RawMessages vazio após ~60s"; exit 1; }
 
 echo "==> Verificando output-queue (mensagem traduzida)"
-body=$(awslocal sqs receive-message --queue-url "$OUTPUT_QUEUE_URL" --query 'Messages[0].Body' --output text)
+body=""
+for i in $(seq 1 10); do
+  body=$(awslocal sqs receive-message --queue-url "$OUTPUT_QUEUE_URL" \
+    --wait-time-seconds 5 --query 'Messages[0].Body' --output text 2>/dev/null)
+  [ -n "$body" ] && [ "$body" != "None" ] && break
+done
 echo "    body: $body"
 echo "$body" | grep -q '"first_name":"Sebastian"' || { echo "FALHA: snake_case ausente"; exit 1; }
 echo "$body" | grep -q '"Status"' && { echo "FALHA: campo descartado vazou"; exit 1; } || true
