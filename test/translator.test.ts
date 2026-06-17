@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SQSEvent } from 'aws-lambda';
 
 // Mocka os helpers de I/O para testar apenas a orquestração do handler.
-const saveRawMessageIfNew = vi.fn();
+const claimRawMessage = vi.fn();
+const markDelivered = vi.fn();
 const sendMessage = vi.fn();
 
 vi.mock('../src/lib/ddb', () => ({
-  saveRawMessageIfNew: (...a: unknown[]) => saveRawMessageIfNew(...a),
+  claimRawMessage: (...a: unknown[]) => claimRawMessage(...a),
+  markDelivered: (...a: unknown[]) => markDelivered(...a),
 }));
 vi.mock('../src/lib/sqs', () => ({ sendMessage: (...a: unknown[]) => sendMessage(...a) }));
 
@@ -45,17 +47,20 @@ function inputBody(overrides: Record<string, unknown> = {}): string {
 
 describe('translator handler', () => {
   beforeEach(() => {
-    saveRawMessageIfNew.mockReset().mockResolvedValue(true); // por padrão: novo
+    claimRawMessage.mockReset().mockResolvedValue({ outcome: 'claimed' }); // por padrão: novo
+    markDelivered.mockReset().mockResolvedValue(undefined);
     sendMessage.mockReset().mockResolvedValue(undefined);
   });
 
-  it('envia o traduzido (snake_case) e depois grava o raw para auditoria', async () => {
+  it('reserva, envia o traduzido (snake_case) e marca delivered', async () => {
     const res = await handler(event([{ messageId: '1', body: inputBody() }]));
 
+    expect(claimRawMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(saveRawMessageIfNew).toHaveBeenCalledTimes(1);
-    // chave de idempotência repassada ao helper de auditoria
-    expect((saveRawMessageIfNew.mock.calls[0][1] as { eventUuid: string }).eventUuid).toBe('evt-0001');
+    expect(markDelivered).toHaveBeenCalledTimes(1);
+    // chave de idempotência repassada ao claim e ao markDelivered
+    expect((claimRawMessage.mock.calls[0][1] as { eventUuid: string }).eventUuid).toBe('evt-0001');
+    expect(markDelivered.mock.calls[0][1]).toBe('evt-0001');
     expect(res.batchItemFailures).toEqual([]);
 
     const sentBody = JSON.parse(sendMessage.mock.calls[0][1] as string);
@@ -65,30 +70,51 @@ describe('translator handler', () => {
     expect(sentBody.Status).toBeUndefined(); // campo descartado
   });
 
-  it('envia primeiro: a entrega ocorre antes da gravação no Dynamo', async () => {
+  it('reserva antes de entregar: claim ocorre antes do send e do markDelivered', async () => {
     const order: string[] = [];
+    claimRawMessage.mockImplementationOnce(async () => {
+      order.push('claim');
+      return { outcome: 'claimed' };
+    });
     sendMessage.mockImplementationOnce(async () => {
       order.push('send');
     });
-    saveRawMessageIfNew.mockImplementationOnce(async () => {
-      order.push('save');
-      return true;
+    markDelivered.mockImplementationOnce(async () => {
+      order.push('markDelivered');
     });
 
     await handler(event([{ messageId: '1', body: inputBody() }]));
-    expect(order).toEqual(['send', 'save']);
+    expect(order).toEqual(['claim', 'send', 'markDelivered']);
   });
 
-  it('duplicada (save=false): já foi entregue, apenas loga e não reporta falha', async () => {
-    saveRawMessageIfNew.mockResolvedValueOnce(false); // EventUuid já registrado
+  it('duplicada (claim=duplicate): não envia e não reporta falha', async () => {
+    claimRawMessage.mockResolvedValueOnce({ outcome: 'duplicate' });
     const res = await handler(event([{ messageId: '1', body: inputBody() }]));
 
-    expect(sendMessage).toHaveBeenCalledTimes(1); // entrega aconteceu
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(markDelivered).not.toHaveBeenCalled();
     expect(res.batchItemFailures).toEqual([]);
   });
 
-  it('gravação best-effort: erro na auditoria não reporta falha (já entregue)', async () => {
-    saveRawMessageIfNew.mockRejectedValueOnce(new Error('dynamo down'));
+  it('recuperação (claim=recover): reataca a entrega e marca delivered', async () => {
+    claimRawMessage.mockResolvedValueOnce({ outcome: 'recover' });
+    const res = await handler(event([{ messageId: '1', body: inputBody() }]));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(markDelivered).toHaveBeenCalledTimes(1);
+    expect(res.batchItemFailures).toEqual([]);
+  });
+
+  it('erro real no claim reporta o record e não envia', async () => {
+    claimRawMessage.mockRejectedValueOnce(new Error('dynamo down'));
+    const res = await handler(event([{ messageId: 'x', body: inputBody() }]));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'x' }]);
+  });
+
+  it('falha no markDelivered: entrega ocorreu, não reporta falha (best-effort)', async () => {
+    markDelivered.mockRejectedValueOnce(new Error('dynamo down'));
     const res = await handler(event([{ messageId: '1', body: inputBody() }]));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
@@ -131,10 +157,11 @@ describe('translator handler', () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('falha de envio reporta o record e não grava no Dynamo', async () => {
+  it('falha de envio reporta o record e não marca delivered (registro fica pending)', async () => {
     sendMessage.mockRejectedValueOnce(new Error('sqs down'));
     const res = await handler(event([{ messageId: 'x', body: inputBody() }]));
     expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'x' }]);
-    expect(saveRawMessageIfNew).not.toHaveBeenCalled();
+    expect(claimRawMessage).toHaveBeenCalledTimes(1);
+    expect(markDelivered).not.toHaveBeenCalled();
   });
 });
